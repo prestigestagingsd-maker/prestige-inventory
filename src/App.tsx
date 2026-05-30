@@ -859,88 +859,55 @@ function EmptyState() {
 }
 
 function QRScanTab({ items, session, onAction, savedAddresses, onCheckout }) {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [scanning, setScanning] = useState(false);
+  const fileInputRef = useRef(null);
   const [scannedItem, setScannedItem] = useState(null);
   const [error, setError] = useState("");
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [manualId, setManualId] = useState("");
-  const [jsQRLoaded, setJsQRLoaded] = useState(false);
-  const streamRef = useRef(null);
-  const animFrameRef = useRef(null);
+  const [processing, setProcessing] = useState(false);
 
   // Load jsQR library dynamically
   useEffect(() => {
-    if (window.jsQR) { setJsQRLoaded(true); return; }
+    if (window.jsQR) return;
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-    script.onload = () => setJsQRLoaded(true);
-    script.onerror = () => setError("QR library failed to load. Use manual ID below.");
     document.head.appendChild(script);
   }, []);
 
-  const stopCamera = () => {
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    setScanning(false);
-  };
-
-  const startCamera = async () => {
-    setError(""); setScannedItem(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (video) {
-        video.srcObject = stream;
-        video.setAttribute("playsinline", "true");
-        video.setAttribute("muted", "true");
-        video.muted = true;
-        await video.play().catch(()=>{});
-        video.onloadedmetadata = () => video.play().catch(()=>{});
-      }
-      setScanning(true);
-      setTimeout(scanFrame, 800);
-    } catch(e) {
-      setError("Camera access denied. Make sure you allow camera access and try again.");
-    }
-  };
-
-  const scanFrame = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || !window.jsQR) {
-      animFrameRef.current = requestAnimationFrame(scanFrame);
-      return;
-    }
-    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: "dontInvert"
-      });
-      if (code && code.data) {
-        handleScan(code.data);
-        return;
-      }
-    }
-    animFrameRef.current = requestAnimationFrame(scanFrame);
-  };
-
   const handleScan = (raw) => {
-    stopCamera();
     const parts = raw.split("|");
     const id = parts[0];
     const found = items.find(i => i.id === id);
-    if (found) setScannedItem(found);
+    if (found) { setScannedItem(found); setError(""); }
     else setError(`No item found with ID "${id}". Try manually below.`);
+    setProcessing(false);
+  };
+
+  // iPhone-compatible: use file input with capture to open camera
+  const handleImageCapture = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setProcessing(true); setError("");
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width; canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      if (window.jsQR) {
+        const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+        if (code) { handleScan(code.data); }
+        else { setError("No QR code found in image. Try again with better lighting."); setProcessing(false); }
+      } else {
+        setError("QR scanner still loading, try again in a second."); setProcessing(false);
+      }
+    };
+    img.src = url;
+    // Reset input so same file can be selected again
+    e.target.value = "";
   };
 
   const handleManualLookup = (val) => {
@@ -949,48 +916,38 @@ function QRScanTab({ items, session, onAction, savedAddresses, onCheckout }) {
     else setError(`No item found with ID "${val.trim()}"`);
   };
 
-  useEffect(() => () => stopCamera(), []);
-
   return (
     <div style={{ maxWidth:560 }}>
       <div style={{ marginBottom:20 }}>
         <h2 style={{ margin:"0 0 4px", fontSize:18, fontWeight:700 }}>Scan QR Code</h2>
-        <p style={{ margin:0, fontSize:12, color:C.textMid }}>Point your camera at an item's QR code.</p>
+        <p style={{ margin:0, fontSize:12, color:C.textMid }}>Take a photo of an item's QR code to check it in or out.</p>
       </div>
 
       {!scannedItem && (
         <div style={{ ...S.card, padding:20, marginBottom:16 }}>
-          {!scanning ? (
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:48, marginBottom:12 }}>📷</div>
-              <button onClick={startCamera} disabled={!jsQRLoaded}
-                style={{ ...S.btnPrimary, padding:"12px 28px", opacity:jsQRLoaded?1:0.5 }}>
-                {jsQRLoaded ? "Start Camera" : "Loading scanner…"}
-              </button>
-              <p style={{ margin:"14px 0 0", fontSize:12, color:C.textSoft }}>Works on iPhone, Android & desktop</p>
-            </div>
-          ) : (
-            <div style={{ position:"relative" }}>
-              <video ref={videoRef} style={{ width:"100%", borderRadius:8, background:"#111", display:"block", maxHeight:320, objectFit:"cover" }}
-                playsInline muted autoPlay />
-              <canvas ref={canvasRef} style={{ display:"none" }} />
-              <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
-                <div style={{ width:200, height:200, border:`3px solid ${C.gold}`, borderRadius:16, boxShadow:"0 0 0 9999px rgba(0,0,0,0.45)" }}>
-                  <div style={{ position:"absolute", top:-3, left:-3, width:24, height:24, borderTop:`4px solid ${C.gold}`, borderLeft:`4px solid ${C.gold}`, borderRadius:"4px 0 0 0" }} />
-                  <div style={{ position:"absolute", top:-3, right:-3, width:24, height:24, borderTop:`4px solid ${C.gold}`, borderRight:`4px solid ${C.gold}`, borderRadius:"0 4px 0 0" }} />
-                  <div style={{ position:"absolute", bottom:-3, left:-3, width:24, height:24, borderBottom:`4px solid ${C.gold}`, borderLeft:`4px solid ${C.gold}`, borderRadius:"0 0 0 4px" }} />
-                  <div style={{ position:"absolute", bottom:-3, right:-3, width:24, height:24, borderBottom:`4px solid ${C.gold}`, borderRight:`4px solid ${C.gold}`, borderRadius:"0 0 4px 0" }} />
-                </div>
-              </div>
-              <div style={{ position:"absolute", bottom:50, left:0, right:0, textAlign:"center" }}>
-                <span style={{ background:"rgba(0,0,0,0.6)", color:"#fff", fontSize:11, padding:"4px 10px", borderRadius:99 }}>Align QR code within the frame</span>
-              </div>
-              <button onClick={stopCamera} style={{ ...S.ghost, marginTop:12, width:"100%", textAlign:"center" }}>Stop Camera</button>
-            </div>
-          )}
+          <div style={{ textAlign:"center", marginBottom:20 }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>📷</div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleImageCapture}
+              style={{ display:"none" }}
+            />
+            <button
+              onClick={()=>fileInputRef.current.click()}
+              disabled={processing}
+              style={{ ...S.btnPrimary, padding:"14px 32px", fontSize:14, opacity:processing?0.6:1 }}>
+              {processing ? "Scanning…" : "📷 Open Camera"}
+            </button>
+            <p style={{ margin:"12px 0 0", fontSize:11, color:C.textSoft }}>
+              Takes a photo and instantly scans the QR code
+            </p>
+          </div>
 
-          <div style={{ marginTop:16, borderTop:`1px solid ${C.border}`, paddingTop:14 }}>
-            <label style={S.label}>Enter Item ID manually</label>
+          <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:16 }}>
+            <label style={S.label}>Or enter item ID manually</label>
             <div style={{ display:"flex", gap:8 }}>
               <input value={manualId} onChange={e=>setManualId(e.target.value)} placeholder="e.g. F001" style={{ ...S.input, flex:1 }} onKeyDown={e=>e.key==="Enter"&&handleManualLookup(manualId)} />
               <button onClick={()=>handleManualLookup(manualId)} style={{ ...S.btnGold, padding:"10px 16px", flexShrink:0 }}>Find</button>
