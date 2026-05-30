@@ -878,14 +878,25 @@ setScanning(false);
 const startCamera = async () => {
 setError(""); setScanResult(""); setScannedItem(null);
 try {
-const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+const stream = await navigator.mediaDevices.getUserMedia({
+video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }
+});
 streamRef.current = stream;
 if (videoRef.current) {
-videoRef.current.srcObject = stream;
-videoRef.current.play();
+const video = videoRef.current;
+video.srcObject = stream;
+video.setAttribute("playsinline", true);
+video.setAttribute("autoplay", true);
+video.setAttribute("muted", true);
+// iPhone fix: must call play() after setting srcObject
+try { await video.play(); } catch(e) {}
+// Wait for video to be ready
+video.onloadedmetadata = () => {
+video.play().catch(()=>{});
+};
 }
 setScanning(true);
-scanFrame();
+setTimeout(() => scanFrame(), 500);
 } catch(e) {
 setError("Camera access denied or unavailable. Try typing the item ID below.");
 }
@@ -950,7 +961,7 @@ return (
 </div>
 ) : (
 <div style={{ position:"relative" }}>
-<video ref={videoRef} style={{ width:"100%", borderRadius:8, background:"#000" }} muted playsInline />
+<video ref={videoRef} style={{ width:"100%", borderRadius:8, background:"#000", display:"block" }} muted playsInline autoPlay webkit-playsinline="true" x5-playsinline="true" />
 <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
 <div style={{ width:180, height:180, border:`3px solid ${C.gold}`, borderRadius:12, boxShadow:"0 0 0 9999px rgba(0,0,0,0.4)" }} />
 </div>
