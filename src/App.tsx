@@ -150,16 +150,7 @@ style={S.input} onKeyDown={e=>e.key==="Enter"&&submit()} />
 {loading ? "Signing in…" : "Sign In"}
 </button>
 
-<div style={{ marginTop:24, paddingTop:20, borderTop:`1px solid ${C.border}` }}>
-<div style={{ fontSize:10, color:C.textSoft, letterSpacing:"0.1em", marginBottom:10, textTransform:"uppercase" }}>Demo credentials</div>
-{[["admin","admin123","Admin"],["maria","maria123","Worker"],["james","james123","Worker"]].map(([u,p,r])=>(
-<div key={u} style={{ fontSize:11, color:C.textMid, marginBottom:4, display:"flex", gap:8 }}>
-<span style={{ color:C.gold, fontWeight:600, minWidth:50 }}>{u}</span>
-<span>{p}</span>
-<span style={{ color:C.textSoft }}>— {r}</span>
-</div>
-))}
-</div>
+
 </div>
 
 <div style={{ width:60, height:2, background:C.gold, marginTop:32 }} />
