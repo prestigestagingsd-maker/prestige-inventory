@@ -24,6 +24,26 @@ const sb = async (path, options = {}) => {
   return text ? JSON.parse(text) : [];
 };
 
+// Upload a photo to Supabase Storage, returns the public URL
+const uploadPhoto = async (file) => {
+  const ext = file.name.split(".").pop() || "jpg";
+  const fileName = `item_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/photos/${fileName}`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": file.type || "image/jpeg",
+    },
+    body: file,
+  });
+  if (!res.ok) {
+    console.error("Photo upload failed:", await res.text());
+    return null;
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/photos/${fileName}`;
+};
+
 const db = {
   // Items
   getItems: () => sb("items?select=*&order=id"),
@@ -437,13 +457,16 @@ function AdminView({ session, items, setItems, users, setUsers, rooms, setRooms,
   const openEditItem = (item) => { setItemForm({...item}); setEditItemId(item.id); setShowItemForm(true); };
   const saveItem = async () => {
     if (!itemForm.name.trim()) return;
+    if (itemForm.photoUploading) { alert("Please wait for the photo to finish uploading."); return; }
+    // Remove the temporary photoUploading flag before saving
+    const { photoUploading, ...cleanForm } = itemForm;
     if (editItemId) {
       const existing = items.find(i=>i.id===editItemId);
-      await db.updateItem(editItemId, {...itemForm, status:existing?.status||"in", log:existing?.log||[]});
-      setItems(p=>p.map(it=>it.id===editItemId?{...itemForm,id:editItemId,status:it.status,log:it.log}:it));
+      await db.updateItem(editItemId, {...cleanForm, status:existing?.status||"in", log:existing?.log||[]});
+      setItems(p=>p.map(it=>it.id===editItemId?{...cleanForm,id:editItemId,status:it.status,log:it.log}:it));
     } else {
       const id="F"+String(Date.now()).slice(-6);
-      const newItem = {...itemForm,id,status:"in",qty:itemForm.qty||1,log:[]};
+      const newItem = {...cleanForm,id,status:"in",qty:cleanForm.qty||1,log:[]};
       await db.addItem(newItem);
       setItems(p=>[...p,newItem]);
     }
@@ -481,9 +504,19 @@ function AdminView({ session, items, setItems, users, setUsers, rooms, setRooms,
     markReturn(id);
   };
 
-  const handlePhoto = (e) => {
+  const handlePhoto = async (e) => {
     const file = e.target.files[0]; if(!file) return;
-    const r = new FileReader(); r.onload = ev => setItemForm(f=>({...f,photo:ev.target.result})); r.readAsDataURL(file);
+    // Show a temporary local preview while uploading
+    const localPreview = URL.createObjectURL(file);
+    setItemForm(f=>({...f, photo: localPreview, photoUploading: true}));
+    // Upload to Supabase Storage
+    const url = await uploadPhoto(file);
+    if (url) {
+      setItemForm(f=>({...f, photo: url, photoUploading: false}));
+    } else {
+      alert("Photo upload failed. Please try again.");
+      setItemForm(f=>({...f, photo: null, photoUploading: false}));
+    }
   };
 
   const openAddUser = () => { setUserForm({ name:"", username:"", password:"", role:"worker" }); setEditUserId(null); setShowUserForm(true); };
@@ -687,7 +720,7 @@ function AdminView({ session, items, setItems, users, setUsers, rooms, setRooms,
           <div style={{ marginBottom:22 }}>
             <label style={S.label}>Photo</label>
             <div onClick={()=>fileRef.current.click()} style={{ border:`2px dashed ${C.border}`, borderRadius:8, minHeight:80, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", color:C.textSoft, fontSize:13, background:itemForm.photo?`url(${itemForm.photo}) center/cover`:C.bgDeep }}>
-              {!itemForm.photo&&"📷 Upload photo"}
+              {itemForm.photoUploading ? "⏳ Uploading…" : (!itemForm.photo&&"📷 Upload photo")}
             </div>
             <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} style={{ display:"none" }} />
             {itemForm.photo && <button onClick={()=>setItemForm(f=>({...f,photo:null}))} style={{ background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:12,fontFamily:"'Georgia',serif",marginTop:4 }}>Remove photo</button>}
