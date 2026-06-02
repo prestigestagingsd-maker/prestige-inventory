@@ -67,34 +67,33 @@ const C = {
 };
 
 // ── QR Code ────────────────────────────────────────────────────
-const QRCode = ({ value, size = 120 }) => {
-  const canvasRef = useRef(null);
+const QRDisplay = ({ value, size = 120 }) => {
+  const divRef = useRef(null);
   useEffect(() => {
-    if (!canvasRef.current || !value) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    canvas.width = size; canvas.height = size;
-    const hash = (str) => { let h = 0; for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0; return Math.abs(h); };
-    const modules = 21; const moduleSize = size / modules;
-    ctx.fillStyle = "#faf7f4"; ctx.fillRect(0, 0, size, size);
-    const seed = hash(value);
-    const getBit = (x, y) => {
-      const inFinder = (cx, cy) => x >= cx && x <= cx + 6 && y >= cy && y <= cy + 6;
-      if (inFinder(0,0) || inFinder(14,0) || inFinder(0,14)) {
-        const lx0 = x < 7 ? x : x - 14; const ly0 = y < 7 ? y : y - 14;
-        if (lx0 >= 0 && lx0 <= 6 && ly0 >= 0 && ly0 <= 6)
-          return (lx0===0||lx0===6||ly0===0||ly0===6)||(lx0>=2&&lx0<=4&&ly0>=2&&ly0<=4) ? 1 : 0;
+    if (!divRef.current || !value) return;
+    divRef.current.innerHTML = "";
+    const generateQR = () => {
+      if (window.QRCode) {
+        new window.QRCode(divRef.current, {
+          text: value,
+          width: size,
+          height: size,
+          colorDark: "#2c2825",
+          colorLight: "#faf7f4",
+          correctLevel: window.QRCode.CorrectLevel.M,
+        });
       }
-      if (y === 6) return x % 2 === 0 ? 1 : 0;
-      if (x === 6) return y % 2 === 0 ? 1 : 0;
-      return ((seed * (x * 31 + y * 17 + 7)) % 97) < 48 ? 1 : 0;
     };
-    for (let y = 0; y < modules; y++) for (let x = 0; x < modules; x++) {
-      ctx.fillStyle = getBit(x, y) ? C.charcoal : "#faf7f4";
-      ctx.fillRect(Math.floor(x*moduleSize), Math.floor(y*moduleSize), Math.ceil(moduleSize), Math.ceil(moduleSize));
+    if (window.QRCode) {
+      generateQR();
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+      script.onload = generateQR;
+      document.head.appendChild(script);
     }
   }, [value, size]);
-  return <canvas ref={canvasRef} style={{ borderRadius: 3 }} />;
+  return <div ref={divRef} style={{ borderRadius:4, lineHeight:0 }} />;
 };
 
 // ── Constants ──────────────────────────────────────────────────
@@ -839,7 +838,7 @@ function ItemDetailCard({ item, isWorker, onAction, onDownloadQR }) {
         {/* QR */}
         <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
           <div data-qr={item.id} style={{ background:C.surface, padding:14, borderRadius:10, border:`1px solid ${C.border}` }}>
-            <QRCode value={`${item.id}|${item.name}|${item.room}`} size={130} />
+            <QRDisplay value={`${item.id}|${item.name}|${item.room}`} size={130} />
           </div>
           <div style={{ fontSize:10, color:C.textSoft, letterSpacing:"0.08em", textTransform:"uppercase" }}>Scan to identify</div>
           {onDownloadQR && <button onClick={onDownloadQR} style={{ ...S.ghost, fontSize:11, padding:"6px 14px" }}>⬇ Download QR</button>}
@@ -1030,19 +1029,21 @@ function CheckoutInline({ savedAddresses, onConfirm, onCancel }) {
   );
 }
 
-function SettingsTab({ rooms, setRooms, items }) {
+function SettingsTab({ rooms, setRooms, items, db }) {
   const [newCat, setNewCat] = useState("");
   const usageCount = (room) => items.filter(i=>i.room===room).length;
 
-  const addCategory = () => {
+  const addCategory = async () => {
     const v = newCat.trim();
     if (!v || rooms.includes(v)) return;
+    await db.addRoom(v);
     setRooms(p=>[...p, v]);
     setNewCat("");
   };
 
-  const deleteCategory = (room) => {
-    if (usageCount(room) > 0) return; // prevent delete if items use it
+  const deleteCategory = async (room) => {
+    if (usageCount(room) > 0) return;
+    await db.deleteRoom(room);
     setRooms(p=>p.filter(r=>r!==room));
   };
 
